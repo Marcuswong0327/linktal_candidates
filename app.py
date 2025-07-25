@@ -4,7 +4,7 @@ import re
 import pandas as pd
 from io import BytesIO
 
-# Function to extract text from a Word document
+# Extract text from docx
 def extract_text_from_docx(doc):
     full_text = []
     for para in doc.paragraphs:
@@ -12,7 +12,7 @@ def extract_text_from_docx(doc):
             full_text.append(para.text.strip())
     return full_text
 
-# Function to parse individual candidate page
+# Parse candidate info per page
 def parse_candidate_info(text_lines):
     first_name = text_lines[0].strip().title() if text_lines else "NA"
 
@@ -21,22 +21,19 @@ def parse_candidate_info(text_lines):
     np = "NA"
     rfl = "NA"
 
-    joined_text = " ".join(text_lines)
-
     for line in text_lines:
-        line_upper = line.upper()
-        if line_upper.startswith("CS:"):
+        upper_line = line.upper()
+        if upper_line.startswith("CS:"):
             cs = line.partition("CS:")[2].strip()
-        elif line_upper.startswith("ES:"):
+        elif upper_line.startswith("ES:"):
             es = line.partition("ES:")[2].strip()
-        elif line_upper.startswith("NOTICE PERIOD:") or line_upper.startswith("NP:"):
+        elif upper_line.startswith("NOTICE PERIOD:") or upper_line.startswith("NP:"):
             np = line.partition(":")[2].strip()
 
-    rfl_match = re.search(r"RFL[:\s]*(.*?)(?=\n|$)", joined_text, re.IGNORECASE | re.DOTALL)
+    full_text = "\n".join(text_lines)
+    rfl_match = re.search(r"RFL[:\s]*(.*)", full_text, re.IGNORECASE | re.DOTALL)
     if rfl_match:
         rfl = rfl_match.group(1).strip()
-
-    summary = joined_text
 
     return {
         "First Name": first_name,
@@ -44,7 +41,6 @@ def parse_candidate_info(text_lines):
         "ES": es,
         "Notice Period": np,
         "RFL/Reason for Leaving": rfl,
-        "Summary": summary
     }
 
 # Streamlit app
@@ -54,19 +50,21 @@ uploaded_file = st.file_uploader("Upload Word Document (.docx)", type="docx")
 
 if uploaded_file:
     doc = docx.Document(uploaded_file)
-
-    # Split by pages or assume each page starts with a name line
     candidates = []
-    page_lines = []
 
+    page_lines = []
     for para in doc.paragraphs:
-        text = para.text.strip()
-        if text:
-            if re.match(r"^[A-Z\s]{2,}$", text) and page_lines:
-                candidates.append(parse_candidate_info(page_lines))
-                page_lines = [text]  # New page starts
-            else:
-                page_lines.append(text)
+        line = para.text.strip()
+        if not line:
+            continue
+        # Check for new page by capitalized name line (first line of page)
+        if page_lines == []:
+            page_lines.append(line)
+        elif re.match(r"^[A-Z\s]{2,}$", line) and len(page_lines) >= 2:
+            candidates.append(parse_candidate_info(page_lines))
+            page_lines = [line]
+        else:
+            page_lines.append(line)
 
     if page_lines:
         candidates.append(parse_candidate_info(page_lines))
