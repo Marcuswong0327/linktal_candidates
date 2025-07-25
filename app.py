@@ -52,7 +52,7 @@ if uploaded_file:
     for para in doc.paragraphs:
         text = para.text.strip()
         if text:
-            if re.match(r"^[A-Z][a-z]+(?:\s[A-Z][a-z]+)*$", text) and page_lines:
+            if re.match(r"^[A-Z\s]{2,}$", text) and page_lines:
                 candidates.append(parse_candidate_info(page_lines))
                 page_lines = [text]  # New page starts
             else:
