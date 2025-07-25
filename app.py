@@ -23,7 +23,7 @@ def parse_candidate_info(text_lines):
     first_name = text_lines[0].strip() if text_lines else "NA"
     cs = search(r"CS[:\s]*([\d\.kK\+\s]+)")
     es = search(r"ES[:\s]*([\d\.kK\+\s]+)")
-    notice_period = search(r"(?:Notice period|NP)[:\s]*([\w\s\d]+)")
+    notice_period = search(r"(?:Notice period|NP)[:\s]*((?:immediate|\d+\s*(?:day|week|month|year)s?)[\w\s]*)")
     rfl = search(r"RFL[:\s]*([\w\s,]+)")
 
     summary = joined_text
