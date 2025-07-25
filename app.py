@@ -16,16 +16,16 @@ def extract_text_from_docx(doc):
 def parse_candidate_info(text_lines):
     joined_text = " ".join(text_lines)
 
-    def search(pattern, default=""):
+    def search(pattern):
         match = re.search(pattern, joined_text, re.IGNORECASE)
-        return match.group(1).strip() if match else default
+        return match.group(1).strip() if match else "NA"
 
-    first_name = text_lines[0].strip().split()[0] if text_lines else ""
+    first_name = text_lines[0].strip() if text_lines else "NA"
     cs = search(r"CS[:\s]*([\d\.kK\+\s]+)")
     es = search(r"ES[:\s]*([\d\.kK\+\s]+)")
     notice_period = search(r"(?:Notice period|NP)[:\s]*([\w\s\d]+)")
     rfl = search(r"RFL[:\s]*([\w\s,]+)")
-    
+
     summary = joined_text
 
     return {
