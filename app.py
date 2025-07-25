@@ -14,12 +14,17 @@ def extract_text_from_docx(doc):
 
 # Function to parse individual candidate page
 def parse_candidate_info(text_lines):
-    first_name = text_lines[0].strip().title() if text_lines else "NA"
-
+    first_name = "NA"
     cs = "NA"
     es = "NA"
     np = "NA"
     rfl = "NA"
+
+    # Look for the name after a line of underscores
+    for i in range(len(text_lines) - 1):
+        if re.match(r"^_+$", text_lines[i]):
+            first_name = text_lines[i + 1].strip().title()
+            break
 
     # Only extract CS, ES, NOTICE PERIOD from their specific line only
     for line in text_lines:
