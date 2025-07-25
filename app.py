@@ -20,7 +20,7 @@ def parse_candidate_info(text_lines):
         match = re.search(pattern, joined_text, re.IGNORECASE)
         return match.group(1).strip() if match else "NA"
 
-    first_name = text_lines[0].strip() if text_lines else "NA"
+    first_name = text_lines[0].strip().title() if text_lines else "NA"
     cs = search(r"CS[:\s]*([\d\.kK\+\s]+)")
     es = search(r"ES[:\s]*([\d\.kK\+\s]+)")
     notice_period = search(r"(?:Notice period|NP)[:\s]*((?:immediate|\d+\s*(?:day|week|month|year)s?)[\w\s]*)")
@@ -38,14 +38,14 @@ def parse_candidate_info(text_lines):
     }
 
 # Streamlit app
-st.title("Candidate Info Extractor from Word Document")
+st.title("Candidate Info Extractor from Word Document (All-Caps Names)")
 
 uploaded_file = st.file_uploader("Upload Word Document (.docx)", type="docx")
 
 if uploaded_file:
     doc = docx.Document(uploaded_file)
 
-    # Split by pages or assume each page starts with a name line
+    # Split by pages using all-uppercase names
     candidates = []
     page_lines = []
 
@@ -54,7 +54,7 @@ if uploaded_file:
         if text:
             if re.match(r"^[A-Z\s]{2,}$", text) and page_lines:
                 candidates.append(parse_candidate_info(page_lines))
-                page_lines = [text]  # New page starts
+                page_lines = [text]  # Start new page
             else:
                 page_lines.append(text)
 
