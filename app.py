@@ -17,6 +17,7 @@ def extract_candidate_info_from_page(page_text: str) -> Dict[str, str]:
     """
     Extract candidate information from a single page text.
     Returns a dictionary with extracted fields.
+    This function now processes ONLY the current page content.
     """
     lines = page_text.strip().split('\n')
     
@@ -30,117 +31,180 @@ def extract_candidate_info_from_page(page_text: str) -> Dict[str, str]:
         'Summary': page_text.strip()
     }
     
-    # Extract first name from first line
+    # Extract first name from first line (guaranteed to be from this page only)
     if lines:
         first_line = lines[0].strip()
         if first_line:
             result['First Name'] = first_line
     
-    # Process line by line for specific fields
+    # Process line by line for specific fields - ONLY within this page
     rfl_lines = []
     rfl_started = False
     
-    for line in lines:
+    for i, line in enumerate(lines):
         line = line.strip()
         if not line:
             continue
             
-        # Check for CS pattern
-        cs_match = re.search(r'CS:\s*(.+)', line, re.IGNORECASE)
+        # Check for CS pattern - extract only from the same line
+        cs_match = re.search(r'CS:\s*([^\n\r]+)', line, re.IGNORECASE)
         if cs_match:
-            result['CS'] = cs_match.group(1).strip()
+            extracted_cs = cs_match.group(1).strip()
+            # Clean up - stop at next colon or end of meaningful content
+            extracted_cs = re.split(r'\s+[A-Z]+:', extracted_cs)[0].strip()
+            result['CS'] = extracted_cs
             continue
             
-        # Check for ES pattern
-        es_match = re.search(r'ES:\s*(.+)', line, re.IGNORECASE)
+        # Check for ES pattern - extract only from the same line
+        es_match = re.search(r'ES:\s*([^\n\r]+)', line, re.IGNORECASE)
         if es_match:
-            result['ES'] = es_match.group(1).strip()
+            extracted_es = es_match.group(1).strip()
+            # Clean up - stop at next colon or end of meaningful content
+            extracted_es = re.split(r'\s+[A-Z]+:', extracted_es)[0].strip()
+            result['ES'] = extracted_es
             continue
             
-        # Check for Notice Period or NP pattern
-        np_match = re.search(r'(?:NOTICE PERIOD|NP):\s*(.+)', line, re.IGNORECASE)
+        # Check for Notice Period or NP pattern - extract only from the same line
+        np_match = re.search(r'(?:NOTICE PERIOD|NP):\s*([^\n\r]+)', line, re.IGNORECASE)
         if np_match:
-            result['Notice Period'] = np_match.group(1).strip()
+            extracted_np = np_match.group(1).strip()
+            # Clean up - stop at next colon or end of meaningful content
+            extracted_np = re.split(r'\s+[A-Z]+:', extracted_np)[0].strip()
+            result['Notice Period'] = extracted_np
             continue
             
-        # Check for RFL pattern
+        # Check for RFL pattern - this can span multiple lines
         rfl_match = re.search(r'RFL:\s*(.+)', line, re.IGNORECASE)
         if rfl_match:
             rfl_started = True
-            rfl_lines.append(rfl_match.group(1).strip())
+            rfl_content = rfl_match.group(1).strip()
+            # Clean up first line of RFL - stop at next field
+            rfl_content = re.split(r'\s+[A-Z]+:', rfl_content)[0].strip()
+            if rfl_content:
+                rfl_lines.append(rfl_content)
             continue
             
-        # If RFL has started and current line doesn't contain other patterns, add to RFL
-        if rfl_started and not any(pattern in line.upper() for pattern in ['CS:', 'ES:', 'NOTICE PERIOD:', 'NP:']):
-            # Check if line starts with a new field pattern, if so stop RFL collection
-            if re.match(r'^[A-Z]+:', line):
+        # If RFL has started, continue collecting lines until we hit another field
+        if rfl_started:
+            # Stop RFL collection if we encounter another field pattern
+            if re.match(r'^[A-Z]+:\s', line, re.IGNORECASE):
                 rfl_started = False
+                # Process this line for other patterns
+                continue
             else:
-                rfl_lines.append(line)
+                # Add this line to RFL if it's meaningful content
+                if line and not re.match(r'^[A-Z]+:$', line):  # Not just a field label
+                    rfl_lines.append(line)
     
-    # Combine RFL lines
+    # Combine RFL lines and clean up
     if rfl_lines:
-        result['RFL'] = ' '.join(rfl_lines).strip()
+        combined_rfl = ' '.join(rfl_lines).strip()
+        # Remove any trailing field patterns that might have been caught
+        combined_rfl = re.split(r'\s+[A-Z]+:\s', combined_rfl)[0].strip()
+        result['RFL'] = combined_rfl
     
     return result
 
 def extract_pages_from_docx(docx_file) -> List[str]:
     """
     Extract text from each page of a DOCX file.
-    Returns a list of page texts.
+    Returns a list of page texts, properly separated by page breaks.
     """
     try:
         doc = Document(docx_file)
         pages = []
-        current_page = []
+        current_page_content = []
         
+        # Process each paragraph and look for page breaks
         for paragraph in doc.paragraphs:
+            # Check if paragraph contains a page break
+            page_break_found = False
+            
+            # Check for page break in the paragraph's runs
+            for run in paragraph.runs:
+                if run._element.xml.find('w:br') != -1:
+                    # Check if it's a page break
+                    if 'type="page"' in run._element.xml or 'w:type="page"' in run._element.xml:
+                        page_break_found = True
+                        break
+            
+            # Add paragraph text to current page
             text = paragraph.text.strip()
             if text:
-                current_page.append(text)
+                current_page_content.append(text)
             
-            # Check for page break (simple heuristic - empty paragraphs or page break)
-            # Since python-docx doesn't easily detect page breaks, we'll use a different approach
-            # We'll split based on patterns that indicate a new person/page
+            # If page break found, save current page and start new one
+            if page_break_found:
+                if current_page_content:
+                    pages.append('\n'.join(current_page_content))
+                    current_page_content = []
+        
+        # Add the last page if it has content
+        if current_page_content:
+            pages.append('\n'.join(current_page_content))
+        
+        # If no page breaks were detected, try alternative splitting methods
+        if len(pages) == 1 and pages[0]:
+            # Try to split by detecting person names/sections
+            full_text = pages[0]
             
-        # For now, we'll treat the entire document as pages separated by multiple empty lines
-        # or when we encounter a pattern that looks like a new person
-        full_text = '\n'.join([p.text for p in doc.paragraphs])
-        
-        # Split by multiple newlines or when we see a pattern that indicates new person
-        sections = re.split(r'\n\s*\n\s*\n', full_text)
-        
-        # Filter out empty sections
-        pages = [section.strip() for section in sections if section.strip()]
-        
-        # If no clear separation found, try to split by detecting names at start
-        if len(pages) == 1:
-            lines = full_text.split('\n')
-            current_section = []
-            pages = []
+            # Method 1: Split by multiple empty lines (3 or more line breaks)
+            sections = re.split(r'\n\s*\n\s*\n+', full_text)
+            sections = [section.strip() for section in sections if section.strip()]
             
-            for i, line in enumerate(lines):
-                line = line.strip()
-                if not line:
-                    continue
+            if len(sections) > 1:
+                pages = sections
+            else:
+                # Method 2: Smart detection based on name patterns and content structure
+                lines = full_text.split('\n')
+                pages = []
+                current_section = []
+                
+                for i, line in enumerate(lines):
+                    line = line.strip()
+                    if not line:
+                        continue
                     
-                # If this looks like a name (first line of a new section)
-                # and we have content in current_section, start a new page
-                if (i > 0 and 
-                    len(current_section) > 5 and  # Minimum content threshold
-                    re.match(r'^[A-Z][a-z]+ [A-Z][a-z]+$', line.strip())):  # Name pattern
+                    # Detect potential new person/page based on patterns
+                    is_likely_new_person = False
                     
-                    if current_section:
+                    # Check if this line looks like a name (at start of document or after sufficient content)
+                    if (i == 0 or len(current_section) > 10):  # First line or after substantial content
+                        # Pattern 1: All caps name (JOHN DOE)
+                        if re.match(r'^[A-Z][A-Z\s]+[A-Z]$', line) and len(line.split()) >= 2:
+                            is_likely_new_person = True
+                        # Pattern 2: Title case name (John Doe)
+                        elif re.match(r'^[A-Z][a-z]+\s+[A-Z][a-z]+(\s+[A-Z][a-z]+)*$', line):
+                            is_likely_new_person = True
+                        # Pattern 3: Mixed case but looks like a name
+                        elif re.match(r'^[A-Z][a-zA-Z]+\s+[A-Z][a-zA-Z]+', line) and len(line.split()) <= 4:
+                            # Additional validation: next few lines should contain typical resume content
+                            next_lines = lines[i+1:i+5] if i+1 < len(lines) else []
+                            has_resume_content = any(
+                                any(keyword in next_line.upper() for keyword in ['CS:', 'ES:', 'NP:', 'NOTICE', 'RFL:', 'YEAR', 'EXPERIENCE']) 
+                                for next_line in next_lines if next_line.strip()
+                            )
+                            if has_resume_content:
+                                is_likely_new_person = True
+                    
+                    # If we detected a new person and have existing content, save current section
+                    if is_likely_new_person and current_section and len(current_section) > 5:
                         pages.append('\n'.join(current_section))
                         current_section = []
+                    
+                    current_section.append(line)
                 
-                current_section.append(line)
-            
-            # Add the last section
-            if current_section:
-                pages.append('\n'.join(current_section))
+                # Add the last section
+                if current_section:
+                    pages.append('\n'.join(current_section))
         
-        return pages
+        # Final validation: ensure each page has reasonable content
+        valid_pages = []
+        for page in pages:
+            if page.strip() and len(page.split()) >= 10:  # At least 10 words
+                valid_pages.append(page.strip())
+        
+        return valid_pages
         
     except Exception as e:
         st.error(f"Error reading DOCX file: {str(e)}")
@@ -153,6 +217,7 @@ def create_excel_download(df: pd.DataFrame) -> bytes:
     output = io.BytesIO()
     with pd.ExcelWriter(output, engine='openpyxl') as writer:
         df.to_excel(writer, index=False, sheet_name='Candidate_Info')
+    output.seek(0)
     return output.getvalue()
 
 def main():
@@ -183,6 +248,18 @@ def main():
                     return
                 
                 st.success(f"Found {len(pages)} sections/pages in the document.")
+                
+                # Debug information - show page breakdown
+                with st.expander("📋 Page Breakdown (Debug Info)", expanded=False):
+                    for i, page in enumerate(pages, 1):
+                        st.write(f"**Page {i} (Words: {len(page.split())}):**")
+                        # Show first line (name) and word count
+                        first_line = page.split('\n')[0] if page.split('\n') else "Empty"
+                        st.write(f"- First line: `{first_line}`")
+                        st.write(f"- Total words: {len(page.split())}")
+                        # Show preview of content
+                        preview = page[:200] + "..." if len(page) > 200 else page
+                        st.text_area(f"Preview of Page {i}:", preview, height=100, key=f"preview_{i}")
                 
                 # Extract information from each page
                 extracted_data = []
