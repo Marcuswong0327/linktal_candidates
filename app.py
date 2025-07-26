@@ -13,30 +13,27 @@ st.set_page_config(
     layout="wide"
 )
 
-def extract_candidate_info_from_page(page_text: str) -> Dict[str, str]:
+def extract_candidate_info_from_bold_text(section_data: Dict[str, str]) -> Dict[str, str]:
     """
-    Extract candidate information from a single page text.
+    Extract candidate information specifically from bold text content.
     Returns a dictionary with extracted fields.
     """
-    lines = page_text.strip().split('\n')
+    bold_text = section_data.get('bold_text', '')
+    name = section_data.get('name', 'NA')
+    full_text = section_data.get('full_text', '')
     
     # Initialize result dictionary
     result = {
-        'First Name': 'NA',
+        'First Name': name,
         'CS': 'NA',
         'ES': 'NA',
         'Notice Period': 'NA',
         'RFL': 'NA',
-        'Summary': page_text.strip()
+        'Summary': full_text
     }
     
-    # Extract first name from first line
-    if lines:
-        first_line = lines[0].strip()
-        if first_line:
-            result['First Name'] = first_line
-    
-    # Process line by line for specific fields
+    # Process bold text line by line for specific fields
+    lines = bold_text.strip().split('\n')
     rfl_lines = []
     rfl_started = False
     
@@ -45,38 +42,46 @@ def extract_candidate_info_from_page(page_text: str) -> Dict[str, str]:
         if not line:
             continue
             
-        # Check for CS pattern
-        cs_match = re.search(r'CS:\s*(.+)', line, re.IGNORECASE)
+        # Check for CS pattern (Current Salary)
+        cs_match = re.search(r'CS:\s*(.+?)(?:\s+[A-Z]+:|$)', line, re.IGNORECASE)
         if cs_match:
             result['CS'] = cs_match.group(1).strip()
             continue
             
-        # Check for ES pattern
-        es_match = re.search(r'ES:\s*(.+)', line, re.IGNORECASE)
+        # Check for ES pattern (Expected Salary)
+        es_match = re.search(r'ES:\s*(.+?)(?:\s+[A-Z]+:|$)', line, re.IGNORECASE)
         if es_match:
             result['ES'] = es_match.group(1).strip()
             continue
             
-        # Check for Notice Period or NP pattern
-        np_match = re.search(r'(?:NOTICE PERIOD|NP):\s*(.+)', line, re.IGNORECASE)
+        # Check for Notice Period patterns
+        np_match = re.search(r'(?:NOTICE PERIOD|NOTICE|NP):\s*(.+?)(?:\s+[A-Z]+:|$)', line, re.IGNORECASE)
         if np_match:
             result['Notice Period'] = np_match.group(1).strip()
             continue
             
-        # Check for RFL pattern
+        # Check for RFL pattern (Reason for Leaving)
         rfl_match = re.search(r'RFL:\s*(.+)', line, re.IGNORECASE)
         if rfl_match:
             rfl_started = True
-            rfl_lines.append(rfl_match.group(1).strip())
+            rfl_content = rfl_match.group(1).strip()
+            # Clean up - stop at next field if it appears on same line
+            rfl_content = re.split(r'\s+[A-Z]+:', rfl_content)[0].strip()
+            if rfl_content:
+                rfl_lines.append(rfl_content)
             continue
             
-        # If RFL has started and current line doesn't contain other patterns, add to RFL
-        if rfl_started and not any(pattern in line.upper() for pattern in ['CS:', 'ES:', 'NOTICE PERIOD:', 'NP:']):
-            # Check if line starts with a new field pattern, if so stop RFL collection
-            if re.match(r'^[A-Z]+:', line):
+        # If RFL has started, continue collecting lines until we hit another field
+        if rfl_started:
+            # Stop RFL collection if we encounter another field pattern
+            if re.match(r'^[A-Z]+:\s', line, re.IGNORECASE):
                 rfl_started = False
+                # Process this line for other patterns by continuing the loop
+                continue
             else:
-                rfl_lines.append(line)
+                # Add this line to RFL if it doesn't start with a field pattern
+                if not re.match(r'^[A-Z]+:$', line):
+                    rfl_lines.append(line)
     
     # Combine RFL lines
     if rfl_lines:
@@ -84,63 +89,86 @@ def extract_candidate_info_from_page(page_text: str) -> Dict[str, str]:
     
     return result
 
-def extract_pages_from_docx(docx_file) -> List[str]:
+def extract_bold_text_from_docx(docx_file) -> List[Dict[str, str]]:
     """
-    Extract text from each page of a DOCX file.
-    Returns a list of page texts.
+    Extract only bold text from DOCX file and organize by person/section.
+    Returns a list of dictionaries with bold text content per person.
     """
     try:
         doc = Document(docx_file)
-        pages = []
-        current_page = []
+        sections = []
+        current_section_bold_text = []
+        current_section_all_text = []
         
         for paragraph in doc.paragraphs:
-            text = paragraph.text.strip()
-            if text:
-                current_page.append(text)
-            
-            # Check for page break (simple heuristic - empty paragraphs or page break)
-            # Since python-docx doesn't easily detect page breaks, we'll use a different approach
-            # We'll split based on patterns that indicate a new person/page
-            
-        # For now, we'll treat the entire document as pages separated by multiple empty lines
-        # or when we encounter a pattern that looks like a new person
-        full_text = '\n'.join([p.text for p in doc.paragraphs])
-        
-        # Split by multiple newlines or when we see a pattern that indicates new person
-        sections = re.split(r'\n\s*\n\s*\n', full_text)
-        
-        # Filter out empty sections
-        pages = [section.strip() for section in sections if section.strip()]
-        
-        # If no clear separation found, try to split by detecting names at start
-        if len(pages) == 1:
-            lines = full_text.split('\n')
-            current_section = []
-            pages = []
-            
-            for i, line in enumerate(lines):
-                line = line.strip()
-                if not line:
-                    continue
-                    
-                # If this looks like a name (first line of a new section)
-                # and we have content in current_section, start a new page
-                if (i > 0 and 
-                    len(current_section) > 5 and  # Minimum content threshold
-                    re.match(r'^[A-Z][a-z]+ [A-Z][a-z]+$', line.strip())):  # Name pattern
-                    
-                    if current_section:
-                        pages.append('\n'.join(current_section))
-                        current_section = []
+            paragraph_text = paragraph.text.strip()
+            if not paragraph_text:
+                continue
                 
-                current_section.append(line)
+            # Extract bold text from this paragraph
+            bold_text_parts = []
+            for run in paragraph.runs:
+                if run.bold and run.text.strip():
+                    bold_text_parts.append(run.text.strip())
             
-            # Add the last section
-            if current_section:
-                pages.append('\n'.join(current_section))
+            # Add all text for context
+            current_section_all_text.append(paragraph_text)
+            
+            # If we found bold text, add it to current section
+            if bold_text_parts:
+                bold_line = ' '.join(bold_text_parts)
+                current_section_bold_text.append(bold_line)
+            
+            # Check if this might be a new person (name pattern at start)
+            # Simple heuristic: if we have accumulated substantial content and see a name pattern
+            if (len(current_section_all_text) > 10 and 
+                re.match(r'^[A-Z][a-zA-Z]+\s+[A-Z][a-zA-Z]+', paragraph_text) and
+                len(paragraph_text.split()) <= 4):
+                
+                # Save previous section if it has content
+                if current_section_bold_text or current_section_all_text:
+                    sections.append({
+                        'bold_text': '\n'.join(current_section_bold_text),
+                        'full_text': '\n'.join(current_section_all_text[:-1]),  # Exclude current line
+                        'name': current_section_all_text[0] if current_section_all_text else 'Unknown'
+                    })
+                
+                # Start new section
+                current_section_bold_text = []
+                current_section_all_text = [paragraph_text]
         
-        return pages
+        # Add the last section
+        if current_section_bold_text or current_section_all_text:
+            sections.append({
+                'bold_text': '\n'.join(current_section_bold_text),
+                'full_text': '\n'.join(current_section_all_text),
+                'name': current_section_all_text[0] if current_section_all_text else 'Unknown'
+            })
+        
+        # If no clear sections found, treat whole document as one section
+        if not sections:
+            all_bold_text = []
+            all_text = []
+            for paragraph in doc.paragraphs:
+                if paragraph.text.strip():
+                    all_text.append(paragraph.text.strip())
+                    
+                    bold_parts = []
+                    for run in paragraph.runs:
+                        if run.bold and run.text.strip():
+                            bold_parts.append(run.text.strip())
+                    
+                    if bold_parts:
+                        all_bold_text.append(' '.join(bold_parts))
+            
+            if all_bold_text:
+                sections.append({
+                    'bold_text': '\n'.join(all_bold_text),
+                    'full_text': '\n'.join(all_text),
+                    'name': all_text[0] if all_text else 'Unknown'
+                })
+        
+        return sections
         
     except Exception as e:
         st.error(f"Error reading DOCX file: {str(e)}")
@@ -175,21 +203,28 @@ def main():
         # Process button
         if st.button("Extract Information", type="primary"):
             with st.spinner("Processing document..."):
-                # Extract pages from document
-                pages = extract_pages_from_docx(uploaded_file)
+                # Extract bold text sections from document
+                sections = extract_bold_text_from_docx(uploaded_file)
                 
-                if not pages:
-                    st.error("No content found in the document or unable to process the file.")
+                if not sections:
+                    st.error("No content or bold text found in the document.")
                     return
                 
-                st.success(f"Found {len(pages)} sections/pages in the document.")
+                st.success(f"Found {len(sections)} sections with bold text in the document.")
                 
-                # Extract information from each page
+                # Show bold text preview for debugging
+                with st.expander("📋 Bold Text Preview (Debug Info)", expanded=False):
+                    for i, section in enumerate(sections, 1):
+                        st.write(f"**Section {i} - {section['name']}:**")
+                        st.write("Bold text found:")
+                        st.text_area(f"Bold content {i}:", section['bold_text'], height=100, key=f"bold_{i}")
+                
+                # Extract information from each section's bold text
                 extracted_data = []
                 
-                for i, page_text in enumerate(pages):
-                    if page_text.strip():  # Only process non-empty pages
-                        candidate_info = extract_candidate_info_from_page(page_text)
+                for section in sections:
+                    if section['bold_text'].strip():  # Only process sections with bold text
+                        candidate_info = extract_candidate_info_from_bold_text(section)
                         extracted_data.append(candidate_info)
                 
                 if extracted_data:
@@ -236,26 +271,27 @@ def main():
         st.markdown("""
         ### Instructions:
         1. **Upload a Word document (.docx)** containing candidate information
-        2. **Document format**: One candidate per page/section
+        2. **Document format**: Information should be in **BOLD TEXT** in the Word document
         3. **Required format**: 
-           - First line should contain the candidate's name
-           - Use patterns like `CS:`, `ES:`, `NOTICE PERIOD:` or `NP:`, `RFL:` for specific information
+           - Candidate names should be at the beginning of each section
+           - **BOLD TEXT ONLY**: Use patterns like `CS:`, `ES:`, `NOTICE PERIOD:` or `NP:`, `RFL:` in bold format
         4. **Click "Extract Information"** to process the document
         5. **Preview the extracted data** in the table
         6. **Download the Excel file** with all extracted information
         
-        ### Extracted Fields:
+        ### Extracted Fields (from BOLD text only):
         - **First Name**: Extracted from the first line of each section
-        - **CS**: Compensation/salary information (looks for "CS:")
-        - **ES**: Employment status or experience (looks for "ES:")
-        - **Notice Period**: Notice period information (looks for "NOTICE PERIOD:" or "NP:")
-        - **RFL**: Reason for leaving (looks for "RFL:", can span multiple lines)
+        - **CS**: Current salary information (looks for "CS:" in bold)
+        - **ES**: Expected salary (looks for "ES:" in bold)
+        - **Notice Period**: Notice period information (looks for "NOTICE PERIOD:" or "NP:" in bold)
+        - **RFL**: Reason for leaving (looks for "RFL:" in bold, can span multiple lines)
         - **Summary**: Complete text of each candidate's section
         
-        ### Notes:
+        ### Important Notes:
+        - **Only BOLD text** is processed for CS, ES, NP, and RFL extraction
+        - This significantly improves accuracy by focusing on formatted key information
         - Missing information will be marked as "NA"
-        - The tool handles capitalized text format
-        - Multiple sentences are supported for RFL field
+        - The debug section shows exactly what bold text was found
         """)
 
 if __name__ == "__main__":
