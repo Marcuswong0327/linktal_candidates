@@ -5,14 +5,14 @@ import re
 import io
 from typing import List, Dict, Any
 import base64
- 
+
 # Page configuration
 st.set_page_config(
     page_title="Candidate Info Extractor from Word Document",
     page_icon="📄",
     layout="wide"
 )
- 
+
 def extract_candidate_info_from_page(page_text: str) -> Dict[str, str]:
     """
     Extract candidate information from a single page text.
@@ -72,7 +72,7 @@ def extract_candidate_info_from_page(page_text: str) -> Dict[str, str]:
     if rfl_lines:
         result['RFL'] = ' '.join(rfl_lines).strip()
     return result
- 
+
 def extract_pages_from_docx(docx_file) -> List[str]:
     """
     Extract text from each page of a DOCX file.
@@ -121,7 +121,7 @@ def extract_pages_from_docx(docx_file) -> List[str]:
     except Exception as e:
         st.error(f"Error reading DOCX file: {str(e)}")
         return []
- 
+
 def create_excel_download(df: pd.DataFrame) -> bytes:
     """
     Create an Excel file from DataFrame and return as bytes.
@@ -130,7 +130,7 @@ def create_excel_download(df: pd.DataFrame) -> bytes:
     with pd.ExcelWriter(output, engine='openpyxl') as writer:
         df.to_excel(writer, index=False, sheet_name='Candidate_Info')
     return output.getvalue()
- 
+
 def main():
     st.title("Candidate Info Extractor from Word Document")
     # File upload section
@@ -179,41 +179,10 @@ def main():
                         file_name="candidate_information.xlsx",
                         mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
                     )
-                    # Display statistics
-                    col1, col2, col3 = st.columns(3)
-                    with col1:
-                        st.metric("Total Candidates", len(df))
-                    with col2:
-                        st.metric("Complete Profiles", len(df[df['First Name'] != 'NA']))
-                    with col3:
-                        cs_filled = len(df[df['CS'] != 'NA'])
-                        st.metric("CS Information", f"{cs_filled}/{len(df)}")
+                    # Display statistics - only total candidates
+                    st.metric("Total Candidates", len(df))
                 else:
                     st.warning("No candidate information could be extracted from the document.")
-    # Instructions section
-    with st.expander("How to use this tool"):
-        st.markdown("""
-        ### Instructions:
-        1. **Upload a Word document (.docx)** containing candidate information
-        2. **Document format**: One candidate per page/section
-        3. **Required format**: 
-           - First line should contain the candidate's name
-           - Use patterns like `CS:`, `ES:`, `NOTICE PERIOD:` or `NP:`, `RFL:` for specific information
-        4. **Click "Extract Information"** to process the document
-        5. **Preview the extracted data** in the table
-        6. **Download the Excel file** with all extracted information
-        ### Extracted Fields:
-        - **First Name**: Extracted from the first line of each section
-        - **CS**: Compensation/salary information (looks for "CS:")
-        - **ES**: Employment status or experience (looks for "ES:")
-        - **Notice Period**: Notice period information (looks for "NOTICE PERIOD:" or "NP:")
-        - **RFL**: Reason for leaving (looks for "RFL:", can span multiple lines)
-        - **Summary**: Complete text of each candidate's section
-        ### Notes:
-        - Missing information will be marked as "NA"
-        - The tool handles capitalized text format
-        - Multiple sentences are supported for RFL field
-        """)
- 
+
 if __name__ == "__main__":
     main()
